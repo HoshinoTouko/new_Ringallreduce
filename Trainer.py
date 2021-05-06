@@ -30,7 +30,7 @@ class Trainer:
         self.socket_recv = socket_recv
 
         self.sticky_cache = Queue()
-
+        self.best_acc = 0
 
     # Test tool
     def print_params(self, model_to_print):
