@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--port', type=int, help='self port')
     parser.add_argument('--n_ip', type=str, help='next ring allreduce server ip')
     parser.add_argument('--n_port', type=int, help='next ring allreduce server port')
-
+    parser.add_argument('--epoch', type=int, default=120 ,help='epoch')
     args = parser.parse_args()
 
     # Distributed
@@ -139,8 +139,9 @@ def main():
 
     trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv)
     trainer.sync_model()
-    for epoch in range(start_epoch, start_epoch + 200):
+    for epoch in range(start_epoch, start_epoch + args.epoch):
         trainer.train(epoch)
+        trainer.test(epoch)
 
 
 if __name__ == '__main__':
