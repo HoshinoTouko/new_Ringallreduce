@@ -9,6 +9,8 @@ import hooker
 import pickle
 import copy
 
+import numpy as np
+
 from queue import Queue
 
 
@@ -30,7 +32,7 @@ class Trainer:
         self.socket_recv = socket_recv
 
         self.sticky_cache = Queue()
-        self.best_acc = 0
+
 
     # Test tool
     def print_params(self, model_to_print):
@@ -86,9 +88,22 @@ class Trainer:
 
     def ring_allreduce(self, grads):
         works = self.cut(grads[0])
-
+        
         workload_id = self.rank
+        print("scatter-reduce")
         for _ in range(self.world_size - 1):
+
+            # top k
+            for i in range(1,len(works[workload_id])):
+                lens = len(works[workload_id][i])
+                # if lens*0.95 < 1:
+                #     break 
+                # print("lens is :"+str(lens))
+                values, indices = works[workload_id][i].topk(int(lens*0.96),dim=0, largest=True, sorted=True)
+                for j in range(lens):
+                    if j not in indices:
+                        works[workload_id][i][j] = 0
+
             # Send data
             self.send(works[workload_id])
             # print('1. Send workload id %d' % workload_id)
@@ -105,6 +120,7 @@ class Trainer:
         if self.rank == 0:
             workload_id += self.world_size
 
+        print("all-gather")
         for _ in range(self.world_size - 1):
             # Send data
             self.send(works[workload_id])
@@ -162,6 +178,7 @@ class Trainer:
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
     def test(self, epoch):
+        global best_acc
         self.net.eval()
         test_loss = 0
         correct = 0
@@ -182,7 +199,7 @@ class Trainer:
 
         # Save checkpoint.
         acc = 100. * correct / total
-        if acc > self.best_acc:
+        if acc > best_acc:
             print('Saving..')
             state = {
                 'net': self.net.state_dict(),
@@ -192,4 +209,4 @@ class Trainer:
             if not os.path.isdir('checkpoint'):
                 os.mkdir('checkpoint')
             torch.save(state, './checkpoint/ckpt.pth')
-            self.best_acc = acc
+            best_acc = acc

@@ -13,7 +13,8 @@ import torchvision.transforms as transforms
 import os
 import argparse
 
-from Trainer import Trainer
+# from Trainer import Trainer
+from Trainer_loss import Trainer
 
 from models import *
 
@@ -141,6 +142,7 @@ def main():
     trainer.sync_model()
     for epoch in range(start_epoch, start_epoch + args.epoch):
         trainer.train(epoch)
+        print("----- = test = -----")
         trainer.test(epoch)
 
 
