@@ -161,7 +161,9 @@ def main():
         print("----- = test = -----")
         write_test_time(str(time.time()),rank)
         trainer.test(epoch)
-    print(trainer.delay['delay'])
+    # print(trainer.delay)
+    # print(trainer.k_list)
+
 
 
 if __name__ == '__main__':

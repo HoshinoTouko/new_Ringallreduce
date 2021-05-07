@@ -9,9 +9,9 @@ import hooker
 import pickle
 import copy
 import time
-
+import random
 import numpy as np
-from numpy import *
+from numpy import mean, std
 from queue import Queue
 
 
@@ -35,12 +35,13 @@ class Trainer:
         self.sticky_cache = Queue()
         self.dl = dl
         self.tmp_delay = []
+        self.itera = 0
 
-        self.delay = {'delay': [], 'min_delay': 0,
-                      'avg_delay': 0, 'relative_delay': 0}
-        self.k_list = {'kvalue': np.zeros(
-            10000), 'kinc': 0.005, 'kdec': 0.005, 'kmin': 0.005, 'kmax': 0.3}
-        self.para = {'slack': 1.25, 'dec_factor': 0.8}
+        self.delay = []
+        self.k_list = np.zeros(10000)
+        # self.k_list = {'kvalue': np.zeros(
+            # 10000), 'kinc': 0.005, 'kdec': 0.005, 'kmin': 0.005, 'kmax': 0.15}
+        # self.para = {'slack': 1.25, 'dec_factor': 0.8}
 
     # Test tool
     def print_params(self, model_to_print):
@@ -96,6 +97,35 @@ class Trainer:
             for offset in range(self.world_size)
         ]
 
+    def AD2(self,i):
+        min_delay = min(self.delay[:i+1])
+        avg_delay = np.mean(self.delay[:i+1])
+        relative_delay = np.std(self.delay[:i+1],ddof=1)
+        cur_delay = self.delay[i]
+
+        kinc = 0.005
+        kdec = 0.005
+        kmin = 0.005
+        kmax = 0.15
+        slack = 1.15
+        dec_factor = 0.8
+        if cur_delay < slack*min_delay:
+            print("**enter 1")
+            self.k_list[i+1] = self.k_list[i] + kinc
+        else:
+            if cur_delay > slack*avg_delay:
+                print("**enter 2")
+                tmp = (cur_delay - avg_delay)/(cur_delay - slack*min_delay)
+                self.k_list[i+1] = self.k_list[i]*(1-dec_factor*tmp)
+            else:
+                tmp = relative_delay/min_delay
+                if tmp < 0 :
+                    print("**enter 3")  
+                    self.k_list[i+1] = self.k_list[i]+kinc
+                else:
+                    print("**enter 4")
+                    self.k_list[i+1] = self.k_list[i]*(1-dec_factor*tmp)
+
     def ring_allreduce(self, grads):
         works = self.cut(grads[0])
 
@@ -141,14 +171,42 @@ class Trainer:
 
         workload_id = self.rank
         self.tmp_delay = []
+        
+        # for i in range(1, len(works[workload_id])):
+        #     print(">>>>>>dim 0:")
+        #     print(works[workload_id][i][0])
+        #     lens = len(works[workload_id][i])
+        #     values, indices = works[workload_id][i].topk(
+        #         int(lens*0.98), dim=0, largest=True, sorted=True)
+        #     print(values)
+        #     print(indices)
+        #     # for j in range(lens):
+        #     #     if j not in indices:
+        #     #         works[workload_id][i][j] = 0
+        # exit()
         for _ in range(self.world_size - 1):
             # top k
+            # for i in range(1, len(works[workload_id])):
+            #     # print(">>>>>>dim 0:")
+            #     # print(works[workload_id][i][0])
+            #     lens = len(works[workload_id][i])
+            #     values, indices = works[workload_id][i].topk(
+            #         int(lens*0.98), dim=0, largest=True, sorted=True)
+            #     for j in range(lens):
+            #         if j not in indices:
+            #             works[workload_id][i][j] = 0
+
+            # random k
             for i in range(1, len(works[workload_id])):
+                # print(">>>>>>dim 0:")
+                # print(works[workload_id][i][0])
                 lens = len(works[workload_id][i])
-                values, indices = works[workload_id][i].topk(
-                    int(lens*0.96), dim=0, largest=True, sorted=True)
+                # values, indices = works[workload_id][i].topk(
+                #     int(lens*0.98), dim=0, largest=True, sorted=True)
+                kk = random.sample(range(0, lens),int(lens*0.98))
+                # print(kk)
                 for j in range(lens):
-                    if j not in indices:
+                    if j not in kk:
                         works[workload_id][i][j] = 0
 
             # Send data
@@ -187,7 +245,10 @@ class Trainer:
         for workload in works:
             new_grads_0 += workload
         grads[0] = new_grads_0
-        self.delay['delay'].append(mean(self.tmp_delay))
+        # print('len of tmp_delay: '+str(len(self.tmp_delay)))
+        self.delay.append(mean(self.tmp_delay))
+        self.AD2(self.itera)
+        self.itera += 1
         return grads
 
     def merge_grad_to_optimizer(self, optimizer, grads):
