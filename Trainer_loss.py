@@ -8,6 +8,7 @@ import torch
 import hooker
 import pickle
 import copy
+import time
 
 import numpy as np
 
@@ -30,7 +31,7 @@ class Trainer:
         self.criterion = criterion
         self.socket_send = socket_send
         self.socket_recv = socket_recv
-
+        self.best_acc = 0
         self.sticky_cache = Queue()
 
 
@@ -176,9 +177,11 @@ class Trainer:
 
             progress_bar(batch_idx, len(self.trainloader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+        with open('./output/train_output_' + str(self.rank) + '.txt', 'a') as f:
+            f.write(str(epoch) + ' ' + str(train_loss) + ' ' +
+                str(100 * correct / total) + ' '+str(time.time()) + '\n')
 
     def test(self, epoch):
-        global best_acc
         self.net.eval()
         test_loss = 0
         correct = 0
@@ -199,7 +202,7 @@ class Trainer:
 
         # Save checkpoint.
         acc = 100. * correct / total
-        if acc > best_acc:
+        if acc > self.best_acc:
             print('Saving..')
             state = {
                 'net': self.net.state_dict(),
@@ -209,4 +212,8 @@ class Trainer:
             if not os.path.isdir('checkpoint'):
                 os.mkdir('checkpoint')
             torch.save(state, './checkpoint/ckpt.pth')
-            best_acc = acc
+            self.best_acc = acc
+        
+        with open('./output/test_output_' + str(self.rank) + '.txt', 'a') as f:
+            f.write(str(epoch) + ' ' + str(test_loss) + ' ' +
+                str(acc) + ' '+str(time.time())+'\n')

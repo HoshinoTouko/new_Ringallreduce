@@ -11,16 +11,24 @@ import torchvision
 import torchvision.transforms as transforms
 
 import os
+import shutil
 import argparse
 
 # from Trainer import Trainer
 from Trainer_loss import Trainer
 
 from models import *
-
+import time
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+def write_train_time(s,rank):
+    with open('./output/train_output_' + str(rank) + '.txt', 'a') as f:
+        f.write(s+' ')
+
+def write_test_time(s,rank):
+    with open('./output/test_output_' + str(rank) + '.txt', 'a') as f:
+        f.write(s+' ')
 
 def main():
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
@@ -43,6 +51,12 @@ def main():
     self_port = args.port
     next_addr = (args.n_ip, args.n_port)
     # Distributed End
+
+    # clean env
+    if os.path.exists(r'output'):
+        shutil.rmtree(r'output')
+    if not os.path.isdir('output'):
+        os.mkdir('output')
 
     best_acc = 0  # best test accuracy
     start_epoch = 0  # start from epoch 0 or last checkpoint epoch
@@ -141,8 +155,10 @@ def main():
     trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv)
     trainer.sync_model()
     for epoch in range(start_epoch, start_epoch + args.epoch):
+        write_train_time(str(time.time()),rank)
         trainer.train(epoch)
         print("----- = test = -----")
+        write_test_time(str(time.time()),rank)
         trainer.test(epoch)
 
 
