@@ -11,7 +11,7 @@ import copy
 import time
 
 import numpy as np
-
+from numpy import *
 from queue import Queue
 
 
@@ -21,7 +21,7 @@ class Trainer:
     ENDFLAG = b'BINARY_END'
     RECV_BUFFER = 150000 * 1024
 
-    def __init__(self, net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv):
+    def __init__(self, net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv,dl):
         self.net = net
         self.rank = rank
         self.world_size = world_size
@@ -33,7 +33,14 @@ class Trainer:
         self.socket_recv = socket_recv
         self.best_acc = 0
         self.sticky_cache = Queue()
+        self.dl = dl
+        self.tmp_delay = []
 
+        self.delay = {'delay': [], 'min_delay': 0,
+                      'avg_delay': 0, 'relative_delay': 0}
+        self.k_list = {'kvalue': np.zeros(
+            10000), 'kinc': 0.005, 'kdec': 0.005, 'kmin': 0.005, 'kmax': 0.3}
+        self.para = {'slack': 1.25, 'dec_factor': 0.8}
 
     # Test tool
     def print_params(self, model_to_print):
@@ -64,6 +71,8 @@ class Trainer:
                 data_to_return = obj
             else:
                 self.sticky_cache.put(obj)
+        if len(data_to_return) == 2:
+            self.tmp_delay.append(int(round(time.time() * 1000)) - data_to_return['timestamp'])
         return data_to_return
 
     def sync_model(self):
@@ -89,22 +98,9 @@ class Trainer:
 
     def ring_allreduce(self, grads):
         works = self.cut(grads[0])
-        
+
         workload_id = self.rank
-        print("scatter-reduce")
         for _ in range(self.world_size - 1):
-
-            # top k
-            for i in range(1,len(works[workload_id])):
-                lens = len(works[workload_id][i])
-                # if lens*0.95 < 1:
-                #     break 
-                # print("lens is :"+str(lens))
-                values, indices = works[workload_id][i].topk(int(lens*0.96),dim=0, largest=True, sorted=True)
-                for j in range(lens):
-                    if j not in indices:
-                        works[workload_id][i][j] = 0
-
             # Send data
             self.send(works[workload_id])
             # print('1. Send workload id %d' % workload_id)
@@ -121,7 +117,6 @@ class Trainer:
         if self.rank == 0:
             workload_id += self.world_size
 
-        print("all-gather")
         for _ in range(self.world_size - 1):
             # Send data
             self.send(works[workload_id])
@@ -139,6 +134,60 @@ class Trainer:
         for workload in works:
             new_grads_0 += workload
         grads[0] = new_grads_0
+        return grads
+
+    def ring_allreduce_loss(self, grads):
+        works = self.cut(grads[0])
+
+        workload_id = self.rank
+        self.tmp_delay = []
+        for _ in range(self.world_size - 1):
+            # top k
+            for i in range(1, len(works[workload_id])):
+                lens = len(works[workload_id][i])
+                values, indices = works[workload_id][i].topk(
+                    int(lens*0.96), dim=0, largest=True, sorted=True)
+                for j in range(lens):
+                    if j not in indices:
+                        works[workload_id][i][j] = 0
+
+            # Send data
+            data = {'grad':works[workload_id], 'timestamp':int(round(time.time() * 1000))}
+            self.send(data)
+            # print('1. Send workload id %d' % workload_id)
+            workload_id -= 1
+
+            # Recv data
+            data_to_merge = self.recv()
+            # print('1. Recv workload id %d' % workload_id)
+            assert len(data_to_merge['grad']) == len(works[workload_id])
+            # self.tmp_delay.append(int(round(time.time() * 1000)) - data_to_merge['timestamp'])
+
+            for index, item in enumerate(data_to_merge['grad']):
+                works[workload_id][index] += item
+
+        if self.rank == 0:
+            workload_id += self.world_size
+
+        for _ in range(self.world_size - 1):
+            # Send data
+            data = {'grad':works[workload_id], 'timestamp':int(round(time.time() * 1000))}
+            self.send(data)
+            # print('2. Send workload id %d' % workload_id)
+            workload_id -= 1
+
+            # Recv data
+            data_to_merge = self.recv()
+            # print('2. Recv workload id %d' % workload_id)
+            assert len(data_to_merge['grad']) == len(works[workload_id])
+
+            works[workload_id] = data_to_merge['grad']
+
+        new_grads_0 = []
+        for workload in works:
+            new_grads_0 += workload
+        grads[0] = new_grads_0
+        self.delay['delay'].append(mean(self.tmp_delay))
         return grads
 
     def merge_grad_to_optimizer(self, optimizer, grads):
@@ -163,7 +212,10 @@ class Trainer:
             loss.backward()
 
             grads = hooker.get_grad_from_optimizer(optimizer, self.world_size)
-            grads = self.ring_allreduce(grads)
+            if self.dl == 1:
+                grads = self.ring_allreduce_loss(grads)
+            else:
+                grads = self.ring_allreduce(grads)
             # print('Grads length', len(grads[0]))
             self.merge_grad_to_optimizer(optimizer, grads)
 
@@ -179,7 +231,7 @@ class Trainer:
                          % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         with open('./output/train_output_' + str(self.rank) + '.txt', 'a') as f:
             f.write(str(epoch) + ' ' + str(train_loss) + ' ' +
-                str(100 * correct / total) + ' '+str(time.time()) + '\n')
+                    str(100 * correct / total) + ' '+str(time.time()) + '\n')
 
     def test(self, epoch):
         self.net.eval()
@@ -188,7 +240,8 @@ class Trainer:
         total = 0
         with torch.no_grad():
             for batch_idx, (inputs, targets) in enumerate(self.testloader):
-                inputs, targets = inputs.to(self.DEVICE), targets.to(self.DEVICE)
+                inputs, targets = inputs.to(
+                    self.DEVICE), targets.to(self.DEVICE)
                 outputs = self.net(inputs)
                 loss = self.criterion(outputs, targets)
 
@@ -213,7 +266,7 @@ class Trainer:
                 os.mkdir('checkpoint')
             torch.save(state, './checkpoint/ckpt.pth')
             self.best_acc = acc
-        
+
         with open('./output/test_output_' + str(self.rank) + '.txt', 'a') as f:
             f.write(str(epoch) + ' ' + str(test_loss) + ' ' +
-                str(acc) + ' '+str(time.time())+'\n')
+                    str(acc) + ' '+str(time.time())+'\n')

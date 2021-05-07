@@ -43,6 +43,7 @@ def main():
     parser.add_argument('--n_ip', type=str, help='next ring allreduce server ip')
     parser.add_argument('--n_port', type=int, help='next ring allreduce server port')
     parser.add_argument('--epoch', type=int, default=120 ,help='epoch')
+    parser.add_argument('--dl', type=int, default=0 ,help='dynamic loss')
     args = parser.parse_args()
 
     # Distributed
@@ -152,7 +153,7 @@ def main():
     #     1024 * 15000
     # )
 
-    trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv)
+    trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv,args.dl)
     trainer.sync_model()
     for epoch in range(start_epoch, start_epoch + args.epoch):
         write_train_time(str(time.time()),rank)
@@ -160,6 +161,7 @@ def main():
         print("----- = test = -----")
         write_test_time(str(time.time()),rank)
         trainer.test(epoch)
+    print(trainer.delay['delay'])
 
 
 if __name__ == '__main__':
