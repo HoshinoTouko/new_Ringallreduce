@@ -171,43 +171,13 @@ class Trainer:
 
         workload_id = self.rank
         self.tmp_delay = []
-        
-        # for i in range(1, len(works[workload_id])):
-        #     print(">>>>>>dim 0:")
-        #     print(works[workload_id][i][0])
-        #     lens = len(works[workload_id][i])
-        #     values, indices = works[workload_id][i].topk(
-        #         int(lens*0.98), dim=0, largest=True, sorted=True)
-        #     print(values)
-        #     print(indices)
-        #     # for j in range(lens):
-        #     #     if j not in indices:
-        #     #         works[workload_id][i][j] = 0
-        # exit()
-        for _ in range(self.world_size - 1):
-            # top k
-            # for i in range(1, len(works[workload_id])):
-            #     # print(">>>>>>dim 0:")
-            #     # print(works[workload_id][i][0])
-            #     lens = len(works[workload_id][i])
-            #     values, indices = works[workload_id][i].topk(
-            #         int(lens*0.98), dim=0, largest=True, sorted=True)
-            #     for j in range(lens):
-            #         if j not in indices:
-            #             works[workload_id][i][j] = 0
 
-            # random k
+        for _ in range(self.world_size - 1):
+
             for i in range(1, len(works[workload_id])):
-                # print(">>>>>>dim 0:")
-                # print(works[workload_id][i][0])
-                lens = len(works[workload_id][i])
-                # values, indices = works[workload_id][i].topk(
-                #     int(lens*0.98), dim=0, largest=True, sorted=True)
-                kk = random.sample(range(0, lens),int(lens*0.98))
-                # print(kk)
-                for j in range(lens):
-                    if j not in kk:
-                        works[workload_id][i][j] = 0
+                random_data = torch.rand(works[workload_id][i].size())
+                works[workload_id][i][random_data<0.2] = 0
+
 
             # Send data
             data = {'grad':works[workload_id], 'timestamp':int(round(time.time() * 1000))}
