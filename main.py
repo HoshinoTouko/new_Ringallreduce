@@ -30,6 +30,10 @@ def write_test_time(s,rank):
     with open('./output/test_output_' + str(rank) + '.txt', 'a') as f:
         f.write(s+' ')
 
+def write_delay_k(s,rank):
+    with open('./output/test_output_' + str(rank) + '.txt', 'a') as f:
+        f.write(s+' ')
+
 def main():
     parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
     parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
@@ -161,6 +165,7 @@ def main():
         print("----- = test = -----")
         write_test_time(str(time.time()),rank)
         trainer.test(epoch)
+    write_delay_k(str(trainer.delay)+'\n\n'+str(trainer.k_list))
     # print(trainer.delay)
     # print(trainer.k_list)
 
