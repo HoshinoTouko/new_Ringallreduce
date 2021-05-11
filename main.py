@@ -88,7 +88,7 @@ def main():
     # Distributed End
 
     trainloader = torch.utils.data.DataLoader(
-        trainset, batch_size=256, shuffle=(sampler is None), sampler=sampler, num_workers=2)
+        trainset, batch_size=32, shuffle=(sampler is None), sampler=sampler, num_workers=2)
 
     testset = torchvision.datasets.CIFAR10(
         root='./data', train=False, download=True, transform=transform_test)
@@ -157,7 +157,7 @@ def main():
     #     1024 * 15000
     # )
 
-    trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv,args.dl)
+    trainer = Trainer(net, rank, world_size, trainloader, testloader, optimizer, criterion, socket_send, socket_recv, args.dl)
     trainer.sync_model()
     for epoch in range(start_epoch, start_epoch + args.epoch):
         write_train_time(str(time.time()),rank)

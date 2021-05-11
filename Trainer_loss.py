@@ -1,5 +1,6 @@
 import time
 
+import compress
 from utils import progress_bar
 
 import os
@@ -93,13 +94,6 @@ class Trainer:
             self.send(self.net.state_dict())
             print('Rank %d, send model end' % self.rank)
 
-    def cut(self, grads):
-        workload = int(len(grads) / self.world_size) + 1
-        return [
-            grads[workload * offset:workload * (offset + 1)]
-            for offset in range(self.world_size)
-        ]
-
     def AD2(self,i):
         min_delay = min(self.delay[:i+1])
         avg_delay = np.mean(self.delay[:i+1])
@@ -141,6 +135,68 @@ class Trainer:
 
             # Recv data
             data_to_merge = self.recv()
+            # print('1. Recv workload id %d' % workload_id)
+            assert len(data_to_merge) == len(works[workload_id])
+
+            for index, item in enumerate(data_to_merge):
+                works[workload_id][index] += item
+
+        if self.rank == 0:
+            workload_id += self.world_size
+
+        for _ in range(self.world_size - 1):
+            # Send data
+            self.send(works[workload_id])
+            # print('2. Send workload id %d' % workload_id)
+            workload_id -= 1
+
+            # Recv data
+            data_to_merge = self.recv()
+            # print('2. Recv workload id %d' % workload_id)
+            assert len(data_to_merge) == len(works[workload_id])
+
+            works[workload_id] = data_to_merge
+
+        new_grads_0 = []
+        for workload in works:
+            new_grads_0 += workload
+        grads[0] = new_grads_0
+        return grads
+
+    def cut(self, grads):
+        workload = int(len(grads) / self.world_size) + 1
+        return [
+            grads[workload * offset:workload * (offset + 1)]
+            for offset in range(self.world_size)
+        ]
+
+    def cut_with_compress(self, grads):
+        workload = int(len(grads) / self.world_size) + 1
+        return [
+            [
+                compress.compress(_grads.cpu())
+                for _grads in grads[workload * offset:workload * (offset + 1)]
+            ]
+            for offset in range(self.world_size)
+        ]
+
+    def ring_allreduce_with_loss(self, grads):
+        works = self.cut(grads[0])
+        works_to_send = self.cut_with_compress(grads[0])
+
+        workload_id = self.rank
+        for _ in range(self.world_size - 1):
+            # Send data
+            self.send(works_to_send[workload_id])
+            # print('1. Send workload id %d' % workload_id)
+            workload_id -= 1
+
+            # Recv data
+            # data_to_merge = self.recv()
+            data_to_merge = []
+            recved = self.recv()
+            for shape, compressed_data, zero_mask_bitmap in recved:
+                data_to_merge.append(compress.uncompress(shape, compressed_data, zero_mask_bitmap).to(self.DEVICE))
             # print('1. Recv workload id %d' % workload_id)
             assert len(data_to_merge) == len(works[workload_id])
 
@@ -214,7 +270,6 @@ class Trainer:
             
             d_value.append(torch.from_numpy(uncompressed_data).to(self.DEVICE))
 
-            
         return d_value
 
     def ring_allreduce_loss(self, grads):
@@ -300,7 +355,7 @@ class Trainer:
 
             grads = hooker.get_grad_from_optimizer(optimizer, self.world_size)
             if self.dl == 1:
-                grads = self.ring_allreduce_loss(grads)
+                grads = self.ring_allreduce_with_loss(grads)
             else:
                 grads = self.ring_allreduce(grads)
             # print('Grads length', len(grads[0]))
