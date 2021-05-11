@@ -31,7 +31,7 @@ def write_test_time(s,rank):
         f.write(s+' ')
 
 def write_delay_k(s,rank):
-    with open('./output/test_output_' + str(rank) + '.txt', 'a') as f:
+    with open('./output/delay_' + str(rank) + '.txt', 'a') as f:
         f.write(s+' ')
 
 def main():
@@ -165,7 +165,7 @@ def main():
         print("----- = test = -----")
         write_test_time(str(time.time()),rank)
         trainer.test(epoch)
-    write_delay_k(str(trainer.delay)+'\n\n'+str(trainer.k_list))
+    write_delay_k(str(trainer.delay)+'\n\n'+str(trainer.k_list),rank)
     # print(trainer.delay)
     # print(trainer.k_list)
 
